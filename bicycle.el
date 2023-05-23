@@ -88,6 +88,26 @@ Without a prefix argument call `bicycle-cycle-local'."
       (bicycle-cycle-global)
     (bicycle-cycle-local)))
 
+(defun bicycle--useful-cycle (this-cmd msg pred fun beg end)
+  "Wrapper around `outline-map-region', guarding against no-ops.
+For every heading between BEG and END, call FUN if (PRED) is
+non-nil.
+Return t if FUN was called at least once,
+otherwise set `last-command' to trigger the next clause."
+  (let (useful)
+    (outline-map-region
+     (lambda ()
+       (when (funcall pred)
+         (setq useful t)
+         (funcall fun)))
+     beg end)
+    (if useful
+        (progn
+          (bicycle--message msg)
+          (setq this-command this-cmd))
+      (setq last-command this-cmd))
+    useful))
+
 ;;;###autoload
 (defun bicycle-cycle-global ()
   "Cycle visibility of all sections.
@@ -95,9 +115,11 @@ Without a prefix argument call `bicycle-cycle-local'."
 1. OVERVIEW: Show only top-level headings.
 2. TOC:      Show all headings, without treating top-level
              code blocks as sections.
+             Skipped if there are no subheadings.
 3. TREES:    Show all headings, treaing top-level code blocks
              as sections (i.e. their first line is treated as
              a heading).
+             Skipped if there are no code block subheadings.
 4. ALL:      Show everything, except code blocks that have been
              collapsed individually (using a `hideshow' command
              or function)."
@@ -108,26 +130,25 @@ Without a prefix argument call `bicycle-cycle-local'."
     (unless (re-search-forward outline-regexp nil t)
       (user-error "Found no heading"))
     (cond
-     ((eq last-command 'outline-cycle-overview)
-      (outline-map-region
-       (lambda ()
-         (when (and (bicycle--top-level-p)
-                    (bicycle--non-code-children-p))
-           (bicycle--show-children
-            (- outline-code-level bicycle--top-level 1) t)))
-       (point-min)
-       (point-max))
-      (bicycle--message "TOC")
-      (setq this-command 'outline-cycle-toc))
-     ((eq last-command 'outline-cycle-toc)
-      (outline-map-region
-       (lambda ()
-         (when (bicycle--top-level-p)
-           (outline-show-branches)))
-       (point-min)
-       (point-max))
-      (bicycle--message "TREES")
-      (setq this-command 'outline-cycle-trees))
+     ((and (eq last-command 'outline-cycle-overview)
+           (bicycle--useful-cycle
+            'outline-cycle-toc "TOC"
+            (lambda ()
+              (and (bicycle--top-level-p)
+                   (bicycle--non-code-children-p)))
+            (lambda ()
+              (bicycle--show-children
+               (- outline-code-level bicycle--top-level 1) t))
+            (point-min)
+            (point-max))))
+     ((and (eq last-command 'outline-cycle-toc)
+           (bicycle--useful-cycle
+            'outline-cycle-trees "TREES"
+            (lambda ()
+              (cdr (bicycle--child-types)))
+            #'outline-show-branches
+            (point-min)
+            (point-max))))
      ((eq last-command 'outline-cycle-trees)
       (outline-show-all)
       (bicycle--message "ALL"))
@@ -165,7 +186,8 @@ visibility of that subtree through these four states:
 If the section has no children then toggle between HIDE and SHOW.
 If the section has no body (not even empty lines), then there is
 only one state, EMPTY, and cycling does nothing.  If the section
-has no subsections but it contains code, then skip BRANCHES."
+has no subsections but it contains code, or if its children have
+no nested subsections, then skip BRANCHES."
   (let ((eol (save-excursion (end-of-visible-line)    (point)))
         (eoh (save-excursion (outline-end-of-heading) (point)))
         (eos (save-excursion (outline-end-of-subtree) (point))))
@@ -222,12 +244,12 @@ has no subsections but it contains code, then skip BRANCHES."
         (setq this-command 'outline-cycle-children))
        ((and (eq last-command 'outline-cycle-children)
              (not (derived-mode-p 'outline-mode))
-             (or (bicycle--non-code-children-p)
-                 (prog1 nil
-                   (setq last-command 'outline-cycle-branches))))
-        (outline-show-branches)
-        (bicycle--message "BRANCHES")
-        (setq this-command 'outline-cycle-branches))
+             (bicycle--useful-cycle
+              'outline-cycle-branches "BRANCHES"
+              (lambda ()
+                (bicycle--non-code-children-p))
+              #'outline-show-branches
+              eoh eos)))
        ((eq last-command 'outline-cycle-branches)
         (outline-show-subtree)
         (bicycle--message "SUBTREE"))
