@@ -92,7 +92,7 @@ Without a prefix argument call `bicycle-cycle-local'."
 (defun bicycle-cycle-global ()
   "Cycle visibility of all sections.
 
-1. OVERVIEW: Show only top-level heading.
+1. OVERVIEW: Show only top-level headings.
 2. TOC:      Show all headings, without treating top-level
              code blocks as sections.
 3. TREES:    Show all headings, treaing top-level code blocks
@@ -113,7 +113,8 @@ Without a prefix argument call `bicycle-cycle-local'."
        (lambda ()
          (when (and (bicycle--top-level-p)
                     (bicycle--non-code-children-p))
-           (bicycle--show-children nil t)))
+           (bicycle--show-children
+            (- outline-code-level bicycle--top-level 1) t)))
        (point-min)
        (point-max))
       (bicycle--message "TOC")
